@@ -2,3 +2,5 @@ data/
 __pycache__/
 .idea/
 .vscode/
+output/
+test*
