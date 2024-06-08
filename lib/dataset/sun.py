@@ -1,6 +1,7 @@
 import os
 import sys
 import cv2
+import numpy as np
 from torch.utils.data import Dataset
 
 class SUNDataset(Dataset):
@@ -51,12 +52,16 @@ class SUNDataset(Dataset):
         rgb_image = cv2.imread(rgb_path)
         depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
         
+        depth = np.bitwise_or(np.right_shift(depth_image, 3), np.left_shift(depth_image, 13))
+        depth = depth.astype(np.float32) / 1000.0
+        depth[depth > 8.0] = 8.0
+        
         if rgb_image is None:
             raise FileNotFoundError(f"RGB image at {rgb_path} not found")
         if depth_image is None:
             raise FileNotFoundError(f"Depth image at {depth_path} not found")
         
-        return rgb_image, depth_image, self.camera_params[idx]
+        return rgb_image, depth, self.camera_params[idx]
     
 
 if __name__ == '__main__':

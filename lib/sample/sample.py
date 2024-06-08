@@ -84,7 +84,7 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=8e-8, r_max=8):
         valid_mask[x_t, y_t] = False
         print(f"Remaining valid pixels: {valid_mask.sum()}")
         
-    # cv2.imwrite("output/sample_map.png", sample_map)
+    cv2.imwrite("output/sample_map.png", sample_map)
     
     return sampled_points
 
@@ -105,7 +105,7 @@ def sample_all(dataset):
         results.append(future.result())
     
 def visualize(results):
-    wis3d = Wis3D("output/vis", 'point', xyz_pattern=('x', 'y', 'z'))
+    wis3d = Wis3D("output/vis", 'test', xyz_pattern=('x', 'y', 'z'))
     
     for i in range(len(results)):
         points = np.array([point for point, _ in results[i]])
@@ -114,6 +114,53 @@ def visualize(results):
         color = np.array([255, 0, 0], dtype=np.uint8)
         wis3d.add_point_cloud(points, color)
 
+def compute_depth_error(depth_map_t, depth_map_tp, points_t, transformation_matrix):
+    errors = []
+    for point in points_t:
+        # Project the point onto the next frame using the transformation matrix
+        projected_point = transformation_matrix @ np.append(point, 1)
+        projected_point /= projected_point[3]
+        projected_point = projected_point[:3]
+        
+        # Calculate the depth at the projected point in the next frame
+        depth_t = depth_map_t[int(point[1]), int(point[0])]
+        depth_tp = depth_map_tp[int(projected_point[1]), int(projected_point[0])]
+        
+        # Calculate the depth error
+        error = np.linalg.norm(depth_t - depth_tp)
+        errors.append(error)
+    return np.array(errors)
+
+def remove_high_error_points(depth_maps, points_sets, threshold_lambda):
+    filtered_points_sets = []
+    for t, points_t in enumerate(points_sets):
+        if t == 0 or t == len(points_sets) - 1:
+            filtered_points_sets.append(points_t)
+            continue
+        
+        depth_errors = []
+        for t_prime in range(max(0, t-20), min(len(points_sets), t+20), 2):
+            if t_prime != t:
+                transformation_matrix = np.eye(4)  # This should be replaced by the actual transformation matrix
+                depth_error = compute_depth_error(depth_maps[t], depth_maps[t_prime], points_t, transformation_matrix)
+                depth_errors.append(depth_error)
+        
+        depth_errors = np.mean(depth_errors, axis=0)
+        
+        # Thresholding based on lambda_d
+        lambda_d = 0.03 * (depth_maps[t].max() - depth_maps[t].min())
+        filtered_points_t = points_t[depth_errors <= lambda_d]
+        filtered_points_sets.append(filtered_points_t)
+    
+    return filtered_points_sets
+
+# Example usage
+depth_maps = [np.random.rand(100, 100) for _ in range(10)]  # Replace with actual depth maps
+points_sets = [np.random.rand(1000, 3) for _ in range(10)]  # Replace with actual 3D points
+
+filtered_points_sets = remove_high_error_points(depth_maps, points_sets, threshold_lambda=0.03)
+
+
 if __name__ == '__main__':
     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
     dataset = SUNDataset(root_directory)
@@ -121,6 +168,7 @@ if __name__ == '__main__':
     
     cv2.imwrite("output/1.png", depth_image0)
     Dt = depth_image0.astype(np.float32)
+    # print(Dt)
     H, W = 10, 10
     depth_map = np.random.rand(H, W)
     Kt = np.array(camera_param0[0], dtype=np.float32)
