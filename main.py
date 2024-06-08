@@ -1,8 +1,6 @@
 import argparse
-
 from lib.dataset.sun import SUNDataset
-from lib.sample.sample import depth_sampling
-
+from lib.sample.sample import sample_all
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -11,7 +9,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     dataset = SUNDataset(args.root_dir)
+    print(f"Dataset size: {len(dataset)}")
     
-    images, depth_maps, camera_params = zip(*dataset)
-    sampled_points = depth_sampling(images, depth_maps, camera_params)
+    sample_all(dataset)
+    
     

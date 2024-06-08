@@ -2,6 +2,8 @@ import sys
 import cv2
 import numpy as np
 from wis3d.wis3d import Wis3D
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 sys.path.insert(0, sys.path[0]+"/../../")
 from lib.dataset.sun import SUNDataset
@@ -80,12 +82,37 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=8e-8, r_max=8):
         
         sampled_points.append((P_xt, r_xt))
         valid_mask[x_t, y_t] = False
-        # print(f"Remaining valid pixels: {valid_mask.sum()}")
+        print(f"Remaining valid pixels: {valid_mask.sum()}")
         
-    cv2.imwrite("output/sample_map.png", sample_map)
+    # cv2.imwrite("output/sample_map.png", sample_map)
     
     return sampled_points
 
+def sample_all(dataset):
+    images, depth_maps, camera_params = zip(*dataset)
+    
+    futures = []
+    with ThreadPoolExecutor() as executor:
+        for i, depth_map in enumerate(depth_maps):
+            future = executor.submit(non_uniform_sampling, depth_map.astype(np.float32),
+                                     np.array(camera_params[i][0], dtype=np.float32),
+                                     np.array(camera_params[i][1], dtype=np.float32),
+                                     np.array(camera_params[i][2], dtype=np.float32))
+            futures.append(future)
+    
+    results = []
+    for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
+        results.append(future.result())
+    
+def visualize(results):
+    wis3d = Wis3D("output/vis", 'point', xyz_pattern=('x', 'y', 'z'))
+    
+    for i in range(len(results)):
+        points = np.array([point for point, _ in results[i]])
+        print(len(points))
+        points /= points.max()
+        color = np.array([255, 0, 0], dtype=np.uint8)
+        wis3d.add_point_cloud(points, color)
 
 if __name__ == '__main__':
     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
@@ -102,9 +129,4 @@ if __name__ == '__main__':
 
     sampled_points = non_uniform_sampling(Dt, Kt, Rt, Tt)
     
-    wis3d = Wis3D("output/vis", 'point', xyz_pattern=('x', 'y', 'z'))
-    points = np.array([point for point, _ in sampled_points])
-    print(len(points))
-    points /= points.max()
-    color = np.array([255, 0, 0], dtype=np.uint8)
-    wis3d.add_point_cloud(points, color)
+    visualize([sampled_points])
