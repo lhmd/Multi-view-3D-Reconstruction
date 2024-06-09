@@ -5,18 +5,31 @@ from wis3d.wis3d import Wis3D
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-sys.path.insert(0, sys.path[0]+"/../../")
+sys.path.insert(0, sys.path[0] + "/../../")
 from lib.dataset.sun import SUNDataset
 sys.path.pop(0)
 
-def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=8e-8, r_max=8):
-    H, W = depth_map.shape
-    sampled_points = []
-    valid_mask = depth_map > 0
-    sample_map = cv2.resize(valid_mask.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST)
+def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
+
+    def reproject_image_to_3d(image):
+        height, width = image.shape
+        
+        u = np.tile(np.arange(width), (height, 1))
+        v = np.tile(np.arange(height).reshape(-1, 1), (1, width))
+        
+        u_transformed = (u - K[0, 2]) * image / K[0, 0]
+        v_transformed = (v - K[1, 2]) * image / K[1, 1]
+        
+        points_3d = np.stack([u_transformed, v_transformed, image], axis=-1)
+        
+        points_3d = points_3d.reshape(-1, 3)
+        points_3d = (points_3d - Tt).dot(Rt.T)
+        
+        points_3d = points_3d.reshape(height, width, 3)
+        
+        return points_3d
 
     def reproject_pixel_to_3d(u, v, depth):
-        depth = 1 / depth
         u = (u - K[0, 2]) * depth / K[0, 0]
         v = (v - K[1, 2]) * depth / K[1, 1]
         point_3d = np.array([u, v, depth], dtype=np.float32)
@@ -30,65 +43,127 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=8e-8, r_max=8):
         normal = vh[-1]
         return normal / np.linalg.norm(normal)
 
-    def is_in_plane(point, normal, centroid):
-        return np.abs(np.dot(normal, point - centroid)) < delta_d
+    def is_in_plane(points, normal, centroid):
+        return np.abs(np.dot(points - centroid, normal)) < delta_d
+    
+    H, W = depth_map.shape
+    sampled_points = []
+    valid_mask = depth_map > 0
+    sample_map = cv2.resize(valid_mask.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST)
 
-    # 选择一个点进行采样
+    point_3d_map = reproject_image_to_3d(depth_map)
+    
+    # print(point_3d_map.shape)
+
     while np.any(valid_mask):
         x_t, y_t = np.where(valid_mask)[0][0], np.where(valid_mask)[1][0]
         sample_map[x_t, y_t] = 255
 
-        depth_t = depth_map[x_t, y_t]
-        P_xt = reproject_pixel_to_3d(x_t, y_t, depth_t)
-        local_points = []
+        # depth_t = depth_map[x_t, y_t]
+        # P_xt = reproject_pixel_to_3d(x_t, y_t, depth_t)
+        P_xt = point_3d_map[x_t, y_t]
+        # local_points = []
 
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                nx, ny = x_t + dx, y_t + dy
-                if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
-                    depth_n = depth_map[nx, ny]
-                    P_n = reproject_pixel_to_3d(nx, ny, depth_n)
-                    local_points.append(P_n)
+        # for dx in range(-1, 2):
+        #     for dy in range(-1, 2):
+        #         nx, ny = x_t + dx, y_t + dy
+        #         if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
+        #             # depth_n = depth_map[nx, ny]
+        #             # P_n = reproject_pixel_to_3d(nx, ny, depth_n)
+        #             P_n = point_3d_map[nx, ny]
+        #             local_points.append(P_n)
+                    
+        offsets = np.array([[dx, dy] for dx in range(-1, 2) for dy in range(-1, 2)])
+        nx = x_t + offsets[:, 0]
+        ny = y_t + offsets[:, 1]
+        valid_indices = (0 <= nx) & (nx < H) & (0 <= ny) & (ny < W)
+        nx = nx[valid_indices]
+        ny = ny[valid_indices]
+        valid_points_mask = valid_mask[nx, ny] & (depth_map[nx, ny] > 0)
+        local_points = point_3d_map[nx[valid_points_mask], ny[valid_points_mask]]
                     
         normal = compute_plane_normal(np.array(local_points))
         r_xt = 1
 
         while r_xt <= r_max:
             cnt = 0
-            for dx in range(-r_xt, r_xt + 1):
-                for dy in [-r_xt, r_xt]:
-                    nx, ny = x_t + dx, y_t + dy
-                    if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
-                        depth_n = depth_map[nx, ny]
-                        P_n = reproject_pixel_to_3d(nx, ny, depth_n)
-                        if is_in_plane(P_n, normal, P_xt):
-                            valid_mask[nx, ny] = False
-                        else:
-                            cnt += 1
-            for dy in range(-r_xt, r_xt + 1):
-                for dx in [-r_xt, r_xt]:
-                    nx, ny = x_t + dx, y_t + dy
-                    if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
-                        depth_n = depth_map[nx, ny]
-                        P_n = reproject_pixel_to_3d(nx, ny, depth_n)
-                        if is_in_plane(P_n, normal, P_xt):
-                            valid_mask[nx, ny] = False
-                        else:
-                            cnt += 1
+            x_range = np.arange(-r_xt, r_xt + 1)
+            y_range = np.arange(-r_xt, r_xt + 1)
+            dx, dy = np.meshgrid(x_range, y_range)
+            nx = np.clip(x_t + dx, 0, H - 1)
+            ny = np.clip(y_t + dy, 0, W - 1)
+            mask = valid_mask[nx, ny] & (depth_map[nx, ny] > 0)
+            P_n = point_3d_map[nx[mask], ny[mask]]
+            in_plane = is_in_plane(P_n, normal, P_xt)
+            valid_mask[nx[mask], ny[mask]] = ~in_plane
+            cnt += np.count_nonzero(~in_plane)
+            # for dx in range(-r_xt, r_xt + 1):
+            #     for dy in [-r_xt, r_xt]:
+            #         nx, ny = x_t + dx, y_t + dy
+            #         if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
+            #             # depth_n = depth_map[nx, ny]
+            #             # P_n1 = reproject_pixel_to_3d(nx, ny, depth_n)
+            #             P_n = point_3d_map[nx, ny]
+            #             if is_in_plane(P_n, normal, P_xt):
+            #                 valid_mask[nx, ny] = False
+            #             else:
+            #                 cnt += 1
+            # for dy in range(-r_xt, r_xt + 1):
+            #     for dx in [-r_xt, r_xt]:
+            #         nx, ny = x_t + dx, y_t + dy
+            #         if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
+            #             # depth_n = depth_map[nx, ny]
+            #             # P_n = reproject_pixel_to_3d(nx, ny, depth_n)
+            #             P_n = point_3d_map[nx, ny]
+            #             if is_in_plane(P_n, normal, P_xt):
+            #                 valid_mask[nx, ny] = False
+            #             else:
+            #                 cnt += 1
             
             if cnt > 0.75 * (2 * r_xt + 1) ** 2:
                 break
             r_xt += 1
         
-        sampled_points.append((P_xt, r_xt))
+        sampled_points.append((P_xt, r_xt, x_t, y_t))
         valid_mask[x_t, y_t] = False
-        print(f"Remaining valid pixels: {valid_mask.sum()}")
+        
+        # if len(sampled_points) % 500 == 0:
+        #     print(f"Remaining valid pixels: {valid_mask.sum()}")
         
     cv2.imwrite("output/sample_map.png", sample_map)
     
     return sampled_points
 
-def sample_all(dataset):
+def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
+    def project_3d_to_2d(point_3d, K, Rt, Tt):
+        point_3d = np.dot(Rt, point_3d) + Tt
+        u = point_3d[0] * K[0, 0] / point_3d[2] + K[0, 2]
+        v = point_3d[1] * K[1, 1] / point_3d[2] + K[1, 2]
+        print(u, v)
+        return int(u), int(v)
+
+    def depth_error(P_xt, neighbors, camera_params, depth_t):
+        errors = []
+        for t_prime in neighbors:
+            u, v = project_3d_to_2d(P_xt, camera_params[t_prime][0], camera_params[t_prime][1], camera_params[t_prime][2])
+            if 0 <= u < depth_maps[t_prime].shape[1] and 0 <= v < depth_maps[t_prime].shape[0]:
+                depth_actual = depth_maps[t_prime][v, u]
+                error = (depth_t - depth_actual) ** 2
+                errors.append(error)
+        return np.mean(errors)
+
+    filtered_points = []
+    for i, points in enumerate(sampled_points):
+        valid_points = []
+        neighbors = list(range(max(0, i - 20), min(len(depth_maps), i + 20), 2))
+        for P_xt, r_xt, x_t, y_t in points:
+            error = depth_error(P_xt, neighbors, camera_params, depth_maps[i][x_t, y_t])
+            if error <= lambda_d:
+                valid_points.append((P_xt, r_xt))
+        filtered_points.append(valid_points)
+    return filtered_points
+
+def sample_all(dataset, lambda_d=1.2):
     images, depth_maps, camera_params = zip(*dataset)
     
     futures = []
@@ -100,66 +175,34 @@ def sample_all(dataset):
                                      np.array(camera_params[i][2], dtype=np.float32))
             futures.append(future)
     
-    results = []
-    for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
-        results.append(future.result())
+    sampled_points = []
+    for future in as_completed(futures):
+        sampled_points.append(future.result())
     
-def visualize(results):
+    filtered_points = calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d)
+    
+    return filtered_points
+
+def visualize(all_points):
     wis3d = Wis3D("output/vis", 'test', xyz_pattern=('x', 'y', 'z'))
     
-    for i in range(len(results)):
-        points = np.array([point for point, _ in results[i]])
-        print(len(points))
-        points /= points.max()
-        color = np.array([255, 0, 0], dtype=np.uint8)
-        wis3d.add_point_cloud(points, color)
-
-def compute_depth_error(depth_map_t, depth_map_tp, points_t, transformation_matrix):
-    errors = []
-    for point in points_t:
-        # Project the point onto the next frame using the transformation matrix
-        projected_point = transformation_matrix @ np.append(point, 1)
-        projected_point /= projected_point[3]
-        projected_point = projected_point[:3]
-        
-        # Calculate the depth at the projected point in the next frame
-        depth_t = depth_map_t[int(point[1]), int(point[0])]
-        depth_tp = depth_map_tp[int(projected_point[1]), int(projected_point[0])]
-        
-        # Calculate the depth error
-        error = np.linalg.norm(depth_t - depth_tp)
-        errors.append(error)
-    return np.array(errors)
-
-def remove_high_error_points(depth_maps, points_sets, threshold_lambda):
-    filtered_points_sets = []
-    for t, points_t in enumerate(points_sets):
-        if t == 0 or t == len(points_sets) - 1:
-            filtered_points_sets.append(points_t)
-            continue
-        
-        depth_errors = []
-        for t_prime in range(max(0, t-20), min(len(points_sets), t+20), 2):
-            if t_prime != t:
-                transformation_matrix = np.eye(4)  # This should be replaced by the actual transformation matrix
-                depth_error = compute_depth_error(depth_maps[t], depth_maps[t_prime], points_t, transformation_matrix)
-                depth_errors.append(depth_error)
-        
-        depth_errors = np.mean(depth_errors, axis=0)
-        
-        # Thresholding based on lambda_d
-        lambda_d = 0.03 * (depth_maps[t].max() - depth_maps[t].min())
-        filtered_points_t = points_t[depth_errors <= lambda_d]
-        filtered_points_sets.append(filtered_points_t)
     
-    return filtered_points_sets
+    for points in all_points:
+        point_cloud = np.array([point[0] for point in points])
+        # print(len(point_cloud))
+        point_cloud /= point_cloud.max()
+        color = np.array([255, 0, 0], dtype=np.uint8)
+        wis3d.add_point_cloud(point_cloud, color)
+        print("Point number: ", len(point_cloud))
 
-# Example usage
-depth_maps = [np.random.rand(100, 100) for _ in range(10)]  # Replace with actual depth maps
-points_sets = [np.random.rand(1000, 3) for _ in range(10)]  # Replace with actual 3D points
-
-filtered_points_sets = remove_high_error_points(depth_maps, points_sets, threshold_lambda=0.03)
-
+# if __name__ == '__main__':
+#     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/brown_bm_2/brown_bm_2'
+#     # root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
+#     dataset = SUNDataset(root_directory)
+    
+#     filtered_points = sample_all(dataset)
+    
+#     visualize(filtered_points)
 
 if __name__ == '__main__':
     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'

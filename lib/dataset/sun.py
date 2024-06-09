@@ -25,15 +25,15 @@ class SUNDataset(Dataset):
             
             with open(intrinsic_path, 'r') as f:
                 lines = f.readlines()
-                K = [[float(x) for x in line.split()] for line in lines]
+                K = np.array([[float(x) for x in line.split()] for line in lines])
             
             with open(extrinsic_path, 'r') as f:
                 lines = f.readlines()
                 # 0.994043 -0.108925 -0.003710 0.000000
                 # 0.108925 0.991733 0.067837 0.000000
                 # -0.003710 -0.067837 0.997690 0.000000
-                R = [[float(x) for x in line.split()[:3]] for line in lines]
-                T = [float(line.split()[-1]) for line in lines]
+                R = np.array([[float(x) for x in line.split()[:3]] for line in lines])
+                T = np.array([float(line.split()[-1]) for line in lines])
                 
             self.camera_params.append((K, R, T))
             
