@@ -195,29 +195,29 @@ def visualize(all_points):
         wis3d.add_point_cloud(point_cloud, color)
         print("Point number: ", len(point_cloud))
 
-# if __name__ == '__main__':
-#     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/brown_bm_2/brown_bm_2'
-#     # root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
-#     dataset = SUNDataset(root_directory)
-    
-#     filtered_points = sample_all(dataset)
-    
-#     visualize(filtered_points)
-
 if __name__ == '__main__':
-    root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
+    root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/brown_bm_2/brown_bm_2'
+    # root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
     dataset = SUNDataset(root_directory)
-    rgb_image0, depth_image0, camera_param0 = dataset[0]
     
-    cv2.imwrite("output/1.png", depth_image0)
-    Dt = depth_image0.astype(np.float32)
-    # print(Dt)
-    H, W = 10, 10
-    depth_map = np.random.rand(H, W)
-    Kt = np.array(camera_param0[0], dtype=np.float32)
-    Rt = np.array(camera_param0[1], dtype=np.float32)
-    Tt = np.array(camera_param0[2], dtype=np.float32)
+    filtered_points = sample_all(dataset)
+    
+    visualize(filtered_points)
 
-    sampled_points = non_uniform_sampling(Dt, Kt, Rt, Tt)
+# if __name__ == '__main__':
+#     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
+#     dataset = SUNDataset(root_directory)
+#     rgb_image0, depth_image0, camera_param0 = dataset[0]
     
-    visualize([sampled_points])
+#     cv2.imwrite("output/1.png", depth_image0)
+#     Dt = depth_image0.astype(np.float32)
+#     # print(Dt)
+#     H, W = 10, 10
+#     depth_map = np.random.rand(H, W)
+#     Kt = np.array(camera_param0[0], dtype=np.float32)
+#     Rt = np.array(camera_param0[1], dtype=np.float32)
+#     Tt = np.array(camera_param0[2], dtype=np.float32)
+
+#     sampled_points = non_uniform_sampling(Dt, Kt, Rt, Tt)
+    
+#     visualize([sampled_points])
