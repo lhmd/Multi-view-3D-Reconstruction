@@ -1,12 +1,13 @@
 import sys
 import cv2
 import numpy as np
-from wis3d.wis3d import Wis3D
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 
 sys.path.insert(0, sys.path[0] + "/../../")
 from lib.dataset.sun import SUNDataset
+from lib.dataset.scannet import SCANNETDataset
+from lib.visualize.wis3d import Visualizer
 sys.path.pop(0)
 
 def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
@@ -127,8 +128,8 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         sampled_points.append((P_xt, r_xt, x_t, y_t))
         valid_mask[x_t, y_t] = False
         
-        # if len(sampled_points) % 500 == 0:
-        #     print(f"Remaining valid pixels: {valid_mask.sum()}")
+        if len(sampled_points) % 100 == 0:
+            print(f"Remaining valid pixels: {valid_mask.sum()}")
         
     cv2.imwrite("output/sample_map.png", sample_map)
     
@@ -139,7 +140,7 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
         point_3d = np.dot(Rt, point_3d) + Tt
         u = point_3d[0] * K[0, 0] / point_3d[2] + K[0, 2]
         v = point_3d[1] * K[1, 1] / point_3d[2] + K[1, 2]
-        print(u, v)
+        # print(u, v)
         return int(u), int(v)
 
     def depth_error(P_xt, neighbors, camera_params, depth_t):
@@ -150,7 +151,8 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
                 depth_actual = depth_maps[t_prime][v, u]
                 error = (depth_t - depth_actual) ** 2
                 errors.append(error)
-        return np.mean(errors)
+        # 如果没有errors，返回0
+        return np.mean(errors) if errors else 0
 
     filtered_points = []
     for i, points in enumerate(sampled_points):
@@ -158,6 +160,7 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
         neighbors = list(range(max(0, i - 20), min(len(depth_maps), i + 20), 2))
         for P_xt, r_xt, x_t, y_t in points:
             error = depth_error(P_xt, neighbors, camera_params, depth_maps[i][x_t, y_t])
+            # print(error)
             if error <= lambda_d:
                 valid_points.append((P_xt, r_xt))
         filtered_points.append(valid_points)
@@ -167,7 +170,7 @@ def sample_all(dataset, lambda_d=1.2):
     images, depth_maps, camera_params = zip(*dataset)
     
     futures = []
-    with ThreadPoolExecutor() as executor:
+    with ProcessPoolExecutor() as executor:
         for i, depth_map in enumerate(depth_maps):
             future = executor.submit(non_uniform_sampling, depth_map.astype(np.float32),
                                      np.array(camera_params[i][0], dtype=np.float32),
@@ -183,30 +186,44 @@ def sample_all(dataset, lambda_d=1.2):
     
     return filtered_points
 
-def visualize(all_points):
-    wis3d = Wis3D("output/vis", 'test', xyz_pattern=('x', 'y', 'z'))
+def sample_all_single(dataset, lambda_d=1.2):
+    images, depth_maps, camera_params = zip(*dataset)
     
+    sampled_points = []
+    for i, depth_map in enumerate(depth_maps):
+        sampled_points.append(non_uniform_sampling(depth_map.astype(np.float32),
+                                     np.array(camera_params[i][0], dtype=np.float32),
+                                     np.array(camera_params[i][1], dtype=np.float32),
+                                     np.array(camera_params[i][2], dtype=np.float32)))
     
-    for points in all_points:
-        point_cloud = np.array([point[0] for point in points])
-        # print(len(point_cloud))
-        point_cloud /= point_cloud.max()
-        color = np.array([255, 0, 0], dtype=np.uint8)
-        wis3d.add_point_cloud(point_cloud, color)
-        print("Point number: ", len(point_cloud))
+    filtered_points = calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d)
+    
+    return filtered_points
+
 
 if __name__ == '__main__':
-    root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/brown_bm_2/brown_bm_2'
+    # root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/brown_bm_2/brown_bm_2'
     # root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
-    dataset = SUNDataset(root_directory)
+    root_directory = '/data/wangweijie/MV3D_Recon/data/SCANNET/scene0707_00'
     
-    filtered_points = sample_all(dataset)
+    print("Loading dataset...")
+    dataset = SCANNETDataset(root_directory)
     
-    visualize(filtered_points)
+    print("Sampling...")
+    # filtered_points = sample_all(dataset)
+    filtered_points = sample_all_single(dataset)
+    
+    
+    vis = Visualizer("point")
+    point_clouds = []
+    for points in filtered_points:
+        point_clouds.append(np.array([point[0] for point in points]))
+    vis.add_points(point_clouds)
+    
 
 # if __name__ == '__main__':
-#     root_directory = '/data/wangweijie/MV3D_Recon/data/SUNRGBD/xtion/sun3ddata/mit_lab_16/lab_16_nov_2_2012_scan1_erika'
-#     dataset = SUNDataset(root_directory)
+#     root_directory = '/data/wangweijie/MV3D_Recon/data/SCANNET/scene0707_00'
+#     dataset = SCANNETDataset(root_directory)
 #     rgb_image0, depth_image0, camera_param0 = dataset[0]
     
 #     cv2.imwrite("output/1.png", depth_image0)
@@ -220,4 +237,6 @@ if __name__ == '__main__':
 
 #     sampled_points = non_uniform_sampling(Dt, Kt, Rt, Tt)
     
-#     visualize([sampled_points])
+#     vis = Visualizer("test")
+#     point_cloud = np.array([point[0] for point in sampled_points])
+#     vis.add_point_cloud(point_cloud)
