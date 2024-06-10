@@ -30,6 +30,18 @@ def do_fusion(dataset, points, delta_f=0.8):
         
         return points_3d
     
+    def reproject_points_2d_to_3d(depth, u, v, K, Rt, Tt):
+        u = (u - K[0, 2]) * depth / K[0, 0]
+        v = (v - K[1, 2]) * depth / K[1, 1]
+        points_3d = np.stack([u, v, depth], axis=-1)
+        
+        points_3d = points_3d.reshape(-1, 3)
+        points_3d = np.dot(Rt, points_3d.T).T + Tt.T
+        
+        points_3d = points_3d.reshape(-1, 3)
+        
+        return points_3d
+    
     
     def project_3d_to_image(point_3d, K, Rt, Tt):
         point_3d = point_3d.reshape(-1, 3)
@@ -40,14 +52,36 @@ def do_fusion(dataset, points, delta_f=0.8):
         v = v.astype(np.int)
         return u, v
     
-    def confidence(point_cloud, rgb_image, depth_image, camera_param, idx):
+    def confidence(point_cloud, rgb_image, depth_image, camera_param, idx, delta=0.01):
         """
-        对每个三维采样点计算其深度置信度，并对当前帧所有的三维采样点按照置信 度由高到低排序得到有序队列Qt
+        对每个三维采样点计算其深度置信度，并对当前帧所有的三维采样点按照置信度由高到低排序得到有序队列Qt
         """
+        conf_que = deque()
         neighbors = list(range(max(0, idx - 20), min(len(depth_images), idx + 20), 2))
         for x, y, z, r, u, v in point_cloud:
             confidences = []
-            
+            delta_d = delta * (depth_images[idx].max() - depth_images[idx].min())
+            n_depth = [depth_images[idx][u, v] + k * delta_d for k in range(-2, 3)]
+            u_s = np.full(5, u)
+            v_s = np.full(5, v)
+            current_color = rgb_image[u - 1: u + 2, v - 1: v + 2]
+            reprojected_points = reproject_points_2d_to_3d(n_depth, u_s, v_s, camera_param[0], camera_param[1], camera_param[2])
+            conf_neihbors = []
+            for i in neighbors:
+                project_other_points = project_3d_to_image(reprojected_points, camera_params[i][0], camera_params[i][1], camera_params[i][2])
+                now_error = 0
+                errors = []
+                for i, a, b in enumerate(project_other_points):
+                    neighbour_color = rgb_images[i][a - 1: a + 2, b - 1: b + 2]
+                    if i == 2:
+                        now_error = np.sum((current_color - neighbour_color)**2)
+                    else:
+                        errors.append(np.sum((current_color - neighbour_color)**2))
+                min_error = min(errors)
+                conf_neihbors.append(min_error / now_error)
+            conf_point = conf_neihbors.sum() / len(conf_neihbors)
+            conf_que.append([-conf_point, x, y, z, u, v, r, idx])
+        return conf_que
             
         # que = [-conf, x, y, z, u, v, r, id]
         pass
@@ -89,7 +123,4 @@ def do_fusion(dataset, points, delta_f=0.8):
         if confidence_queue[idx]:
             heapq.heappush(conf_h, confidence_queue[idx].popleft())
             
-    
-                    
-
-            
+    return merged_queue
