@@ -49,7 +49,7 @@ class SCANNETDataset(Dataset):
             self.rgb_files = self.rgb_files[::len(self) // num_frames]
             self.depth_files = self.depth_files[::len(self) // num_frames]
             self.camera_params = self.camera_params[::len(self) // num_frames]
-        print(self.rgb_files)
+        # print(self.rgb_files)
         
         
     def __len__(self):

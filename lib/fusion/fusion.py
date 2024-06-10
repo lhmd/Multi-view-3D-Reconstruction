@@ -58,7 +58,8 @@ def do_fusion(dataset, points, delta_f=0.8):
         """
         conf_que = deque()
         neighbors = list(range(max(0, idx - 20), min(len(depth_images), idx + 20), 2))
-        for x, y, z, r, u, v in point_cloud:
+        for P, r, u, v in point_cloud:
+            x, y, z = P
             confidences = []
             delta_d = delta * (depth_images[idx].max() - depth_images[idx].min())
             n_depth = [depth_images[idx][u, v] + k * delta_d for k in range(-2, 3)]
