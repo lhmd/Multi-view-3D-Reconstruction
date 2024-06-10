@@ -23,7 +23,6 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         
         points_3d = points_3d.reshape(-1, 3)
         points_3d = np.dot(Rt, points_3d.T).T + Tt.T
-        # points_3d = (points_3d - Tt).dot(Rt.T)
         
         points_3d = points_3d.reshape(H, W, 3)
         
@@ -33,7 +32,7 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         u = (u - K[0, 2]) * depth / K[0, 0]
         v = (v - K[1, 2]) * depth / K[1, 1]
         point_3d = np.array([u, v, depth], dtype=np.float32)
-        point_3d = np.dot(Rt.T, (point_3d - Tt))
+        point_3d = np.dot(Rt, point_3d.T)
         return point_3d
 
     def compute_plane_normal(points):
@@ -162,7 +161,7 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
             error = depth_error(P_xt, neighbors, camera_params, depth_maps[i][x_t, y_t])
             # print(error)
             if error <= error_limit:
-                valid_points.append((P_xt, r_xt))
+                valid_points.append((P_xt, r_xt, x_t, y_t))
         filtered_points.append(valid_points)
     return filtered_points
 
