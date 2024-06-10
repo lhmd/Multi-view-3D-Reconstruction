@@ -5,14 +5,18 @@ import numpy as np
 from torch.utils.data import Dataset
 
 class SCANNETDataset(Dataset):
-    def __init__(self, root_dir, rgb_dir='color', depth_dir='depth', intrinsics_dir='intrinsic', poses_dir='pose'):
+    def __init__(self, root_dir, rgb_dir='color', depth_dir='depth', intrinsics_dir='intrinsic', poses_dir='pose', num_frames=100):
         self.root_dir = root_dir
         self.rgb_dir = os.path.join(root_dir, rgb_dir)
         self.depth_dir = os.path.join(root_dir, depth_dir)
         self.poses_dir = os.path.join(root_dir, poses_dir)
-        self.rgb_files = sorted([os.path.join(self.rgb_dir, file) for file in os.listdir(self.rgb_dir)])
-        self.depth_files = sorted([os.path.join(self.depth_dir, file) for file in os.listdir(self.depth_dir)])
-        self.pose_files = sorted([os.path.join(self.poses_dir, file) for file in os.listdir(self.poses_dir)])
+        # 文件名按阿拉伯数字顺序排序，不以默认顺序排
+        self.rgb_files = sorted([os.path.join(self.rgb_dir, file) for file in os.listdir(self.rgb_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
+        self.depth_files = sorted([os.path.join(self.depth_dir, file) for file in os.listdir(self.depth_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
+        self.pose_files = sorted([os.path.join(self.poses_dir, file) for file in os.listdir(self.poses_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
+        # self.rgb_files = sorted([os.path.join(self.rgb_dir, file) for file in os.listdir(self.rgb_dir)])
+        # self.depth_files = sorted([os.path.join(self.depth_dir, file) for file in os.listdir(self.depth_dir)])
+        # self.pose_files = sorted([os.path.join(self.poses_dir, file) for file in os.listdir(self.poses_dir)])
         # print(self.rgb_files)
         
         assert len(self.rgb_files) == len(self.depth_files), "RGB and depth image counts do not match"
@@ -26,24 +30,26 @@ class SCANNETDataset(Dataset):
         
         with open(self.intrinsics_color_file, 'r') as f:
             lines = f.readlines()
-            self.K_color = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]])
+            self.K_color = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
             
         with open(self.intrinsics_depth_file, 'r') as f:
             lines = f.readlines()
-            self.K_depth = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]])
+            self.K_depth = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
             
         for i in range(len(self.pose_files)):
             with open(self.pose_files[i], 'r') as f:
                 lines = f.readlines()
-                R = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]])
-                T = np.array([float(line.split()[-1]) for line in lines[:3]])
+                R = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
+                T = np.array([float(line.split()[-1]) for line in lines[:3]], dtype=np.float32)
                 
             self.camera_params.append((self.K_depth, R, T))
         
-        # 只保留前100帧的数据
-        self.rgb_files = self.rgb_files[:100]
-        self.depth_files = self.depth_files[:100]
-        self.camera_params = self.camera_params[:100]
+        if num_frames < len(self):
+            # 间隔采样
+            self.rgb_files = self.rgb_files[::len(self) // num_frames]
+            self.depth_files = self.depth_files[::len(self) // num_frames]
+            self.camera_params = self.camera_params[::len(self) // num_frames]
+        print(self.rgb_files)
         
         
     def __len__(self):

@@ -13,10 +13,8 @@ sys.path.pop(0)
 def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
 
     def reproject_image_to_3d(image):
-        height, width = image.shape
-        
-        u = np.tile(np.arange(width), (height, 1))
-        v = np.tile(np.arange(height).reshape(-1, 1), (1, width))
+        u = np.tile(np.arange(W), (H, 1))
+        v = np.tile(np.arange(H).reshape(-1, 1), (1, W))
         
         u_transformed = (u - K[0, 2]) * image / K[0, 0]
         v_transformed = (v - K[1, 2]) * image / K[1, 1]
@@ -24,9 +22,10 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         points_3d = np.stack([u_transformed, v_transformed, image], axis=-1)
         
         points_3d = points_3d.reshape(-1, 3)
-        points_3d = (points_3d - Tt).dot(Rt.T)
+        points_3d = np.dot(Rt, points_3d.T).T + Tt.T
+        # points_3d = (points_3d - Tt).dot(Rt.T)
         
-        points_3d = points_3d.reshape(height, width, 3)
+        points_3d = points_3d.reshape(H, W, 3)
         
         return points_3d
 
@@ -137,7 +136,7 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
 
 def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
     def project_3d_to_2d(point_3d, K, Rt, Tt):
-        point_3d = np.dot(Rt, point_3d) + Tt
+        point_3d = np.dot(Rt.T, point_3d - Tt)
         u = point_3d[0] * K[0, 0] / point_3d[2] + K[0, 2]
         v = point_3d[1] * K[1, 1] / point_3d[2] + K[1, 2]
         # print(u, v)
@@ -151,52 +150,63 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
                 depth_actual = depth_maps[t_prime][v, u]
                 error = (depth_t - depth_actual) ** 2
                 errors.append(error)
-        # 如果没有errors，返回0
-        return np.mean(errors) if errors else 0
+        # 如果没有errors，返回极大值
+        return np.mean(errors) if errors else np.inf
 
     filtered_points = []
     for i, points in enumerate(sampled_points):
         valid_points = []
         neighbors = list(range(max(0, i - 20), min(len(depth_maps), i + 20), 2))
+        error_limit = lambda_d * (depth_maps[i].max() - depth_maps[i].min())
         for P_xt, r_xt, x_t, y_t in points:
             error = depth_error(P_xt, neighbors, camera_params, depth_maps[i][x_t, y_t])
             # print(error)
-            if error <= lambda_d:
+            if error <= error_limit:
                 valid_points.append((P_xt, r_xt))
         filtered_points.append(valid_points)
     return filtered_points
 
-def sample_all(dataset, lambda_d=1.2):
-    images, depth_maps, camera_params = zip(*dataset)
-    
+def sample_all(dataset, lambda_d=0.03):
     futures = []
+    depth_images = []
+    camera_params = []
+    for i in range(len(dataset)):
+        depth_images.append(dataset[i][1])
+        camera_params.append(dataset[i][2])
     with ProcessPoolExecutor() as executor:
-        for i, depth_map in enumerate(depth_maps):
-            future = executor.submit(non_uniform_sampling, depth_map.astype(np.float32),
-                                     np.array(camera_params[i][0], dtype=np.float32),
-                                     np.array(camera_params[i][1], dtype=np.float32),
-                                     np.array(camera_params[i][2], dtype=np.float32))
+        for i in range(len(dataset)):
+            Dt = depth_images[i].astype(np.float32)
+            Kt = np.array(camera_params[i][0], dtype=np.float32)
+            Rt = np.array(camera_params[i][1], dtype=np.float32)
+            Tt = np.array(camera_params[i][2], dtype=np.float32)
+            future = executor.submit(non_uniform_sampling, Dt, Kt, Rt, Tt)
             futures.append(future)
     
     sampled_points = []
     for future in as_completed(futures):
         sampled_points.append(future.result())
     
-    filtered_points = calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d)
+    filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d)
     
     return filtered_points
 
-def sample_all_single(dataset, lambda_d=1.2):
-    images, depth_maps, camera_params = zip(*dataset)
-    
+def sample_all_single(dataset, lambda_d=0.03):
     sampled_points = []
-    for i, depth_map in enumerate(depth_maps):
-        sampled_points.append(non_uniform_sampling(depth_map.astype(np.float32),
-                                     np.array(camera_params[i][0], dtype=np.float32),
-                                     np.array(camera_params[i][1], dtype=np.float32),
-                                     np.array(camera_params[i][2], dtype=np.float32)))
+    depth_images = []
+    camera_params = []
+    for i in range(len(dataset)):
+        depth_images.append(dataset[i][1])
+        camera_params.append(dataset[i][2])
+    for i in range(len(dataset)):
+        rgb_image, depth_image, camera_param = dataset[i]
+        Dt = depth_image.astype(np.float32)
+        Kt = np.array(camera_param[0], dtype=np.float32)
+        Rt = np.array(camera_param[1], dtype=np.float32)
+        Tt = np.array(camera_param[2], dtype=np.float32)
+
+        sampled_points.append(non_uniform_sampling(Dt, Kt, Rt, Tt))
     
-    filtered_points = calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d)
+    filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d)
     
     return filtered_points
 
@@ -207,11 +217,11 @@ if __name__ == '__main__':
     root_directory = '/data/wangweijie/MV3D_Recon/data/SCANNET/scene0707_00'
     
     print("Loading dataset...")
-    dataset = SCANNETDataset(root_directory)
+    dataset = SCANNETDataset(root_directory, num_frames=100)
     
     print("Sampling...")
-    # filtered_points = sample_all(dataset)
-    filtered_points = sample_all_single(dataset)
+    filtered_points = sample_all(dataset)
+    # filtered_points = sample_all_single(dataset)
     
     
     vis = Visualizer("point")
@@ -230,7 +240,8 @@ if __name__ == '__main__':
 #     Dt = depth_image0.astype(np.float32)
 #     # print(Dt)
 #     H, W = 10, 10
-#     depth_map = np.random.rand(H, W)
+#     # depth_map从0到100，按顺序排列
+#     depth_map = np.arange(100).reshape(H, W)
 #     Kt = np.array(camera_param0[0], dtype=np.float32)
 #     Rt = np.array(camera_param0[1], dtype=np.float32)
 #     Tt = np.array(camera_param0[2], dtype=np.float32)
