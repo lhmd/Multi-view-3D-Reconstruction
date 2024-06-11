@@ -1,3 +1,4 @@
+import os
 import sys
 import cv2
 import numpy as np
@@ -10,7 +11,9 @@ from lib.dataset.scannet import SCANNETDataset
 from lib.visualize.wis3d import Visualizer
 sys.path.pop(0)
 
-def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
+def non_uniform_sampling(depth_map, K, Rt, Tt, idx, output_path, delta_d=7e-3, r_max=8):
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
 
     def reproject_image_to_3d(image):
         u = np.tile(np.arange(W), (H, 1))
@@ -61,16 +64,6 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         # depth_t = depth_map[x_t, y_t]
         # P_xt = reproject_pixel_to_3d(x_t, y_t, depth_t)
         P_xt = point_3d_map[x_t, y_t]
-        # local_points = []
-
-        # for dx in range(-1, 2):
-        #     for dy in range(-1, 2):
-        #         nx, ny = x_t + dx, y_t + dy
-        #         if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
-        #             # depth_n = depth_map[nx, ny]
-        #             # P_n = reproject_pixel_to_3d(nx, ny, depth_n)
-        #             P_n = point_3d_map[nx, ny]
-        #             local_points.append(P_n)
                     
         offsets = np.array([[dx, dy] for dx in range(-1, 2) for dy in range(-1, 2)])
         nx = x_t + offsets[:, 0]
@@ -96,28 +89,6 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
             in_plane = is_in_plane(P_n, normal, P_xt)
             valid_mask[nx[mask], ny[mask]] = ~in_plane
             cnt += np.count_nonzero(~in_plane)
-            # for dx in range(-r_xt, r_xt + 1):
-            #     for dy in [-r_xt, r_xt]:
-            #         nx, ny = x_t + dx, y_t + dy
-            #         if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
-            #             # depth_n = depth_map[nx, ny]
-            #             # P_n1 = reproject_pixel_to_3d(nx, ny, depth_n)
-            #             P_n = point_3d_map[nx, ny]
-            #             if is_in_plane(P_n, normal, P_xt):
-            #                 valid_mask[nx, ny] = False
-            #             else:
-            #                 cnt += 1
-            # for dy in range(-r_xt, r_xt + 1):
-            #     for dx in [-r_xt, r_xt]:
-            #         nx, ny = x_t + dx, y_t + dy
-            #         if 0 <= nx < H and 0 <= ny < W and valid_mask[nx, ny] and depth_map[nx, ny] > 0:
-            #             # depth_n = depth_map[nx, ny]
-            #             # P_n = reproject_pixel_to_3d(nx, ny, depth_n)
-            #             P_n = point_3d_map[nx, ny]
-            #             if is_in_plane(P_n, normal, P_xt):
-            #                 valid_mask[nx, ny] = False
-            #             else:
-            #                 cnt += 1
             
             if cnt > 0.75 * (2 * r_xt + 1) ** 2:
                 break
@@ -129,7 +100,9 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         if len(sampled_points) % 1000 == 0:
             print(f"Remaining valid pixels: {valid_mask.sum()}")
         
-    cv2.imwrite("output/sample_map.png", sample_map)
+    sample_map_path = os.path.join(output_path, f"{idx}.png")
+    # print(f"Saving sample map to {sample_map_path}")
+    cv2.imwrite(sample_map_path, sample_map)
     
     return sampled_points
 
@@ -145,7 +118,7 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
         errors = []
         for t_prime in neighbors:
             u, v = project_3d_to_2d(P_xt, camera_params[t_prime][0], camera_params[t_prime][1], camera_params[t_prime][2])
-            if 0 <= u < depth_maps[t_prime].shape[1] and 0 <= v < depth_maps[t_prime].shape[0]:
+            if 0 <= u < len(depth_maps[t_prime][0]) and 0 <= v < len(depth_maps[t_prime]):
                 depth_actual = depth_maps[t_prime][v, u]
                 error = (depth_t - depth_actual) ** 2
                 errors.append(error)
@@ -165,7 +138,7 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
         filtered_points.append(valid_points)
     return filtered_points
 
-def sample_all(dataset, lambda_d=0.03):
+def sample_all(dataset, output_path='output', lambda_d=0.03):
     futures = []
     depth_images = []
     camera_params = []
@@ -178,7 +151,7 @@ def sample_all(dataset, lambda_d=0.03):
             Kt = np.array(camera_params[i][0], dtype=np.float32)
             Rt = np.array(camera_params[i][1], dtype=np.float32)
             Tt = np.array(camera_params[i][2], dtype=np.float32)
-            future = executor.submit(non_uniform_sampling, Dt, Kt, Rt, Tt)
+            future = executor.submit(non_uniform_sampling, Dt, Kt, Rt, Tt, i, os.path.join(output_path, 'sample_map'))
             futures.append(future)
     
     sampled_points = []
@@ -189,25 +162,25 @@ def sample_all(dataset, lambda_d=0.03):
     
     return filtered_points
 
-def sample_all_single(dataset, lambda_d=0.03):
-    sampled_points = []
-    depth_images = []
-    camera_params = []
-    for i in range(len(dataset)):
-        depth_images.append(dataset[i][1])
-        camera_params.append(dataset[i][2])
-    for i in range(len(dataset)):
-        rgb_image, depth_image, camera_param = dataset[i]
-        Dt = depth_image.astype(np.float32)
-        Kt = np.array(camera_param[0], dtype=np.float32)
-        Rt = np.array(camera_param[1], dtype=np.float32)
-        Tt = np.array(camera_param[2], dtype=np.float32)
+# def sample_all_single(dataset, output_path='output', lambda_d=0.03):
+#     sampled_points = []
+#     depth_images = []
+#     camera_params = []
+#     for i in range(len(dataset)):
+#         depth_images.append(dataset[i][1])
+#         camera_params.append(dataset[i][2])
+#     for i in range(len(dataset)):
+#         rgb_image, depth_image, camera_param = dataset[i]
+#         Dt = depth_image.astype(np.float32)
+#         Kt = np.array(camera_param[0], dtype=np.float32)
+#         Rt = np.array(camera_param[1], dtype=np.float32)
+#         Tt = np.array(camera_param[2], dtype=np.float32)
 
-        sampled_points.append(non_uniform_sampling(Dt, Kt, Rt, Tt))
+#         sampled_points.append(non_uniform_sampling(Dt, Kt, Rt, Tt, i, os.path.join(output_path, 'sample_map')))
     
-    filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d)
+#     filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d)
     
-    return filtered_points
+#     return filtered_points
 
 
 if __name__ == '__main__':

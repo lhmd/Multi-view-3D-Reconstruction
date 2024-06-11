@@ -19,6 +19,7 @@ def save_points(points, folder_path):
     :param points: Points
     :param folder_path: Folder path
     """
+    folder_path = os.path.join(folder_path, 'sampled_points')
     if os.path.exists(folder_path):
         os.system(f'rm -r {folder_path}')
     os.makedirs(folder_path)
@@ -44,6 +45,7 @@ def read_points(folder_path):
     :param folder_path: Folder path
     :return: Points
     """
+    folder_path = os.path.join(folder_path, 'sampled_points')
     points = []
     i = 0
     while True:

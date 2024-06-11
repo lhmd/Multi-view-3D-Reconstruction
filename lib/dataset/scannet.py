@@ -6,54 +6,58 @@ from torch.utils.data import Dataset
 
 class SCANNETDataset(Dataset):
     def __init__(self, root_dir, rgb_dir='color', depth_dir='depth', intrinsics_dir='intrinsic', poses_dir='pose', num_frames=100):
-        self.root_dir = root_dir
-        self.rgb_dir = os.path.join(root_dir, rgb_dir)
-        self.depth_dir = os.path.join(root_dir, depth_dir)
-        self.poses_dir = os.path.join(root_dir, poses_dir)
+        root_dir = root_dir
+        rgb_dir = os.path.join(root_dir, rgb_dir)
+        depth_dir = os.path.join(root_dir, depth_dir)
+        poses_dir = os.path.join(root_dir, poses_dir)
         # 文件名按阿拉伯数字顺序排序，不以默认顺序排
-        self.rgb_files = sorted([os.path.join(self.rgb_dir, file) for file in os.listdir(self.rgb_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
-        self.depth_files = sorted([os.path.join(self.depth_dir, file) for file in os.listdir(self.depth_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
-        self.pose_files = sorted([os.path.join(self.poses_dir, file) for file in os.listdir(self.poses_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
-        # self.rgb_files = sorted([os.path.join(self.rgb_dir, file) for file in os.listdir(self.rgb_dir)])
-        # self.depth_files = sorted([os.path.join(self.depth_dir, file) for file in os.listdir(self.depth_dir)])
-        # self.pose_files = sorted([os.path.join(self.poses_dir, file) for file in os.listdir(self.poses_dir)])
-        # print(self.rgb_files)
+        rgb_files = sorted([os.path.join(rgb_dir, file) for file in os.listdir(rgb_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
+        depth_files = sorted([os.path.join(depth_dir, file) for file in os.listdir(depth_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
+        pose_files = sorted([os.path.join(poses_dir, file) for file in os.listdir(poses_dir)], key=lambda x: int(x.split('/')[-1].split('.')[0]))
         
-        assert len(self.rgb_files) == len(self.depth_files), "RGB and depth image counts do not match"
-        assert len(self.rgb_files) == len(self.pose_files), "RGB and pose counts do not match"
+        # 总帧数num_frames
+        step = len(rgb_files) // num_frames
+        print(f"Step: {step}")
+        rgb_files = rgb_files[::step]
+        depth_files = depth_files[::step]
+        pose_files = pose_files[::step]
         
-        self.intrinsics_dir = os.path.join(root_dir, intrinsics_dir)
-        self.intrinsics_color_file = os.path.join(self.intrinsics_dir, 'intrinsic_color.txt')
-        self.intrinsics_depth_file = os.path.join(self.intrinsics_dir, 'intrinsic_depth.txt')
+        assert len(rgb_files) == len(depth_files), "RGB and depth image counts do not match"
+        assert len(rgb_files) == len(pose_files), "RGB and pose counts do not match"
         
-        self.camera_params = []
+        intrinsics_dir = os.path.join(root_dir, intrinsics_dir)
+        intrinsics_color_file = os.path.join(intrinsics_dir, 'intrinsic_color.txt')
+        intrinsics_depth_file = os.path.join(intrinsics_dir, 'intrinsic_depth.txt')
         
-        with open(self.intrinsics_color_file, 'r') as f:
+        camera_params = []
+        K_color = None
+        K_depth = None
+        
+        with open(intrinsics_color_file, 'r') as f:
             lines = f.readlines()
-            self.K_color = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
+            K_color = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
             
-        with open(self.intrinsics_depth_file, 'r') as f:
+        with open(intrinsics_depth_file, 'r') as f:
             lines = f.readlines()
-            self.K_depth = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
+            K_depth = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
             
-        for i in range(len(self.pose_files)):
-            with open(self.pose_files[i], 'r') as f:
+        for i in range(len(pose_files)):
+            with open(pose_files[i], 'r') as f:
                 lines = f.readlines()
                 R = np.array([[float(x) for x in line.split()[:3]] for line in lines[:3]], dtype=np.float32)
                 T = np.array([float(line.split()[-1]) for line in lines[:3]], dtype=np.float32)
                 
-            self.camera_params.append((self.K_depth, R, T))
+            camera_params.append((K_depth, R, T))
         
-        # if num_frames < len(self):
-        #     # 间隔采样
-        #     self.rgb_files = self.rgb_files[::len(self) // num_frames]
-        #     self.depth_files = self.depth_files[::len(self) // num_frames]
-        #     self.camera_params = self.camera_params[::len(self) // num_frames]
+        print(f"Loaded {len(rgb_files)} frames")
+        self.rgb_files = rgb_files
+        self.depth_files = depth_files
+        self.camera_params = camera_params
         # print(self.rgb_files)
         
-        self.rgb_files = self.rgb_files[:num_frames]
-        self.depth_files = self.depth_files[:num_frames]
-        self.camera_params = self.camera_params[:num_frames]
+        # self.rgb_files = self.rgb_files[:num_frames]
+        # self.depth_files = self.depth_files[:num_frames]
+        # self.camera_params = self.camera_params[:num_frames]
         
         
     def __len__(self):
@@ -65,6 +69,7 @@ class SCANNETDataset(Dataset):
         
         rgb_path = self.rgb_files[idx]
         depth_path = self.depth_files[idx]
+        # print(depth_path)
         
         rgb_image = cv2.imread(rgb_path)
         depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)

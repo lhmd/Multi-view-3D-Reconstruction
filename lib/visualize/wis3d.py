@@ -26,3 +26,6 @@ class Visualizer:
         color = np.array([255, 0, 0], dtype=np.uint8)
         self.wis3d.add_point_cloud(point_cloud, color)
         print("Point number: ", len(point_cloud))
+        
+    def add_mesh(self, mesh):
+        self.wis3d.add_mesh(mesh)
