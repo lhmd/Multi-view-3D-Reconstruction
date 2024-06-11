@@ -44,12 +44,16 @@ class SCANNETDataset(Dataset):
                 
             self.camera_params.append((self.K_depth, R, T))
         
-        if num_frames < len(self):
-            # 间隔采样
-            self.rgb_files = self.rgb_files[::len(self) // num_frames]
-            self.depth_files = self.depth_files[::len(self) // num_frames]
-            self.camera_params = self.camera_params[::len(self) // num_frames]
+        # if num_frames < len(self):
+        #     # 间隔采样
+        #     self.rgb_files = self.rgb_files[::len(self) // num_frames]
+        #     self.depth_files = self.depth_files[::len(self) // num_frames]
+        #     self.camera_params = self.camera_params[::len(self) // num_frames]
         # print(self.rgb_files)
+        
+        self.rgb_files = self.rgb_files[:num_frames]
+        self.depth_files = self.depth_files[:num_frames]
+        self.camera_params = self.camera_params[:num_frames]
         
         
     def __len__(self):

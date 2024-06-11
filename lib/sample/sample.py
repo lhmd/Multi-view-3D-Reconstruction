@@ -126,7 +126,7 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, delta_d=7e-3, r_max=16):
         sampled_points.append((P_xt, r_xt, x_t, y_t))
         valid_mask[x_t, y_t] = False
         
-        if len(sampled_points) % 100 == 0:
+        if len(sampled_points) % 1000 == 0:
             print(f"Remaining valid pixels: {valid_mask.sum()}")
         
     cv2.imwrite("output/sample_map.png", sample_map)
