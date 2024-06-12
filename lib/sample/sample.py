@@ -106,7 +106,9 @@ def non_uniform_sampling(depth_map, K, Rt, Tt, idx, output_path, delta_d=7e-3, r
     
     return sampled_points
 
-def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
+def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d, output_path):
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
     def project_3d_to_2d(point_3d, K, Rt, Tt):
         point_3d = np.dot(Rt.T, point_3d - Tt)
         u = point_3d[0] * K[0, 0] / point_3d[2] + K[0, 2]
@@ -128,6 +130,7 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
     filtered_points = []
     for i, points in enumerate(sampled_points):
         valid_points = []
+        filtered_map = np.zeros_like(depth_maps[i])
         neighbors = list(range(max(0, i - 20), min(len(depth_maps), i + 20), 2))
         error_limit = lambda_d * (depth_maps[i].max() - depth_maps[i].min())
         for P_xt, r_xt, x_t, y_t in points:
@@ -135,7 +138,10 @@ def calculate_depth_error(sampled_points, depth_maps, camera_params, lambda_d):
             # print(error)
             if error <= error_limit:
                 valid_points.append((P_xt, r_xt, x_t, y_t))
+                filtered_map[x_t, y_t] = 255
         filtered_points.append(valid_points)
+        filtered_map_path = os.path.join(output_path, f"{i}.png")
+        cv2.imwrite(filtered_map_path, filtered_map)
     return filtered_points
 
 def sample_all(dataset, output_path='output', lambda_d=0.03):
@@ -158,7 +164,7 @@ def sample_all(dataset, output_path='output', lambda_d=0.03):
     for future in as_completed(futures):
         sampled_points.append(future.result())
     
-    filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d)
+    filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d, os.path.join(output_path, 'depth_error'))
     
     return filtered_points
 
@@ -178,7 +184,7 @@ def sample_all(dataset, output_path='output', lambda_d=0.03):
 
 #         sampled_points.append(non_uniform_sampling(Dt, Kt, Rt, Tt, i, os.path.join(output_path, 'sample_map')))
     
-#     filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d)
+#     filtered_points = calculate_depth_error(sampled_points, depth_images, camera_params, lambda_d, os.path.join(output_path, 'sample_map'))
     
 #     return filtered_points
 
