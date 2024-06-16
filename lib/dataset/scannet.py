@@ -30,6 +30,7 @@ class SCANNETDataset(Dataset):
         intrinsics_depth_file = os.path.join(intrinsics_dir, 'intrinsic_depth.txt')
         
         camera_params = []
+        rgb_params = []
         K_color = None
         K_depth = None
         
@@ -48,11 +49,13 @@ class SCANNETDataset(Dataset):
                 T = np.array([float(line.split()[-1]) for line in lines[:3]], dtype=np.float32)
                 
             camera_params.append((K_depth, R, T))
+            rgb_params.append((K_color, R, T))
         
         print(f"Loaded {len(rgb_files)} frames")
         self.rgb_files = rgb_files
         self.depth_files = depth_files
         self.camera_params = camera_params
+        self.rgb_params = rgb_params
         # print(self.rgb_files)
         
         # self.rgb_files = self.rgb_files[:num_frames]
@@ -80,7 +83,7 @@ class SCANNETDataset(Dataset):
         if depth_image is None:
             raise FileNotFoundError(f"Depth image at {depth_path} not found")
         
-        return rgb_image, depth_image, self.camera_params[idx]
+        return rgb_image, depth_image, self.camera_params[idx], self.rgb_params[idx]
     
 if __name__ == '__main__':
     root_directory = '/data/wangweijie/MV3D_Recon/data/SCANNET/scene0707_00'

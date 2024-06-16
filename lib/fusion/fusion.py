@@ -54,7 +54,7 @@ def do_fusion(dataset, points, delta_f=0.86):
         v = v.astype(np.int64)
         return u, v
     
-    def confidence(point_cloud, rgb_image, depth_image, camera_param, idx, delta=0.01):
+    def confidence(point_cloud, rgb_image, camera_param, rgb_param, idx, delta=0.01):
         """
         对每个三维采样点计算其深度置信度, 并对当前帧所有的三维采样点按照置信度由高到低排序得到有序队列Qt
         """
@@ -72,12 +72,12 @@ def do_fusion(dataset, points, delta_f=0.86):
             reprojected_points = reproject_points_2d_to_3d(n_depth, u_s, v_s, camera_param[0], camera_param[1], camera_param[2])
             conf_neihbors = []
             for k in neighbors:
-                x_coords, y_coords = project_3d_to_image(reprojected_points, camera_params[k][0], camera_params[k][1], camera_params[k][2])
-                # u_coords, v_coords = project_3d_to_image(reprojected_points, camera_param[0], camera_param[1], camera_param[2])
-                # print(sum(u_coords - u_s), sum(v_coords - v_s))
+                x_coords, y_coords = project_3d_to_image(reprojected_points, rgb_params[k][0], rgb_params[k][1], rgb_params[k][2])
                 now_error = float('inf')
                 errors = []
                 for h, (a, b) in enumerate(zip(x_coords, y_coords)):
+                    if a < 0 or a >= len(rgb_images[k]) or b < 0 or b >= len(rgb_images[k][0]):
+                        continue
                     neighbour_color = rgb_images[k][a - 1: a + 2, b - 1: b + 2]
                     # print(neighbour_color)
                     if neighbour_color.shape != (3, 3, 3) or current_color.shape != (3, 3, 3):
@@ -107,17 +107,19 @@ def do_fusion(dataset, points, delta_f=0.86):
     rgb_images = []
     depth_images = []
     camera_params = []
+    rgb_params = []
     confidence_queue = []
     for i in range(len(dataset)):
         rgb_images.append(dataset[i][0])
         depth_images.append(dataset[i][1])
         camera_params.append(dataset[i][2])
+        rgb_params.append(dataset[i][3])
         
     H = len(depth_images[0])
     W = len(depth_images[0][0])
     # print("The origin number of points is: ", sum([len(p) for p in points]))
     for i, point_cloud in enumerate(points):
-        que = confidence(point_cloud, rgb_images[i], depth_images[i], camera_params[i], i)
+        que = confidence(point_cloud, rgb_images[i], camera_params[i], rgb_params[i], i)
         confidence_queue.append(que)
     
     # 取出queue中每个三维点队列最顶端的三维点, 创建一个置信度最大堆 H, 如果是空值则跳过
@@ -129,17 +131,17 @@ def do_fusion(dataset, points, delta_f=0.86):
     heapq.heapify(conf_h)
     print("Confidence queue created, the number of points is: ", sum([len(q) for q in confidence_queue]))
     
-    for i, q in enumerate(confidence_queue):
-        print(f"Frame {i} has {len([x for x in q if x[0] <= -1.0])} points with confidence greater than 1.0")
+    # for i, q in enumerate(confidence_queue):
+    #     print(f"Frame {i} has {len([x for x in q if x[0] <= -1.0])} points with confidence greater than 1.0")
         
-    confs = [val[0] for q in confidence_queue for val in q]
-    confs = np.array(confs)
-    print(confs)
-    from collections import Counter
-    intervals = [(int(x * 100) / 100) for x in confs]
-    interval_counts = Counter(intervals)
-    for interval, count in sorted(interval_counts.items()):
-        print(f"Interval [{interval:.2f}, {interval + 0.01:.2f}): {count}")
+    # confs = [val[0] for q in confidence_queue for val in q]
+    # confs = np.array(confs)
+    # print(confs)
+    # from collections import Counter
+    # intervals = [(int(x * 100) / 100) for x in confs]
+    # interval_counts = Counter(intervals)
+    # for interval, count in sorted(interval_counts.items()):
+    #     print(f"Interval [{interval:.2f}, {interval + 0.01:.2f}): {count}")
     
     
     # 创建一个按照置信度由高到低排序的空队列 M
